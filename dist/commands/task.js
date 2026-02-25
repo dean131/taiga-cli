@@ -227,6 +227,79 @@ exports.taskCommand
         handleError(`Failed to delete task ${taskId}.`, error);
     }
 });
+// ─── Author helper (Taiga history uses 'user' object with nested name) ─────
+function resolveAuthor(entry) {
+    const u = entry.user;
+    if (!u)
+        return chalk_1.default.gray('Unknown');
+    return u.name || u.full_name_display || u.username || u.email || 'Unknown';
+}
+// --- taiga task comments <taskId> ---
+exports.taskCommand
+    .command('comments <taskId>')
+    .description('Read all comments on a task')
+    .action(async (taskId) => {
+    console.log(chalk_1.default.yellow(`Fetching comments for task ${taskId}...`));
+    try {
+        const response = await api_1.apiClient.get(`/history/task/${taskId}`);
+        const history = response.data;
+        // Filter only entries that have a comment
+        const comments = history.filter((entry) => entry.comment && entry.comment.trim() !== '');
+        if (comments.length === 0) {
+            console.log(chalk_1.default.gray('No comments found on this task.'));
+            return;
+        }
+        console.log(chalk_1.default.green(`Found ${comments.length} comment(s):\n`));
+        comments.forEach((entry, i) => {
+            const author = resolveAuthor(entry);
+            const date = new Date(entry.created_at).toLocaleString();
+            console.log(`  ${chalk_1.default.bold(`${i + 1}.`)} ${chalk_1.default.blue(author)} ${chalk_1.default.gray(`· ${date}`)}`);
+            console.log(`  ${entry.comment}`);
+            console.log('');
+        });
+    }
+    catch (error) {
+        handleError(`Failed to fetch comments for task ${taskId}.`, error);
+    }
+});
+// --- taiga task activity <taskId> ---
+exports.taskCommand
+    .command('activity <taskId>')
+    .description('Show full activity log (status changes, assignments, comments) for a task')
+    .action(async (taskId) => {
+    console.log(chalk_1.default.yellow(`Fetching activity for task ${taskId}...`));
+    try {
+        const response = await api_1.apiClient.get(`/history/task/${taskId}`);
+        const history = response.data;
+        if (history.length === 0) {
+            console.log(chalk_1.default.gray('No activity found.'));
+            return;
+        }
+        console.log(chalk_1.default.green(`Activity log (${history.length} entries):\n`));
+        history.forEach((entry) => {
+            const author = resolveAuthor(entry);
+            const date = new Date(entry.created_at).toLocaleString();
+            console.log(`  ${chalk_1.default.blue(author)} ${chalk_1.default.gray(`· ${date}`)}`);
+            // Show field changes
+            if (entry.diff) {
+                for (const [field, value] of Object.entries(entry.diff)) {
+                    if (Array.isArray(value) && value.length === 2) {
+                        const [from, to] = value;
+                        console.log(`    ${chalk_1.default.gray(field + ':')} ${chalk_1.default.red(String(from))} → ${chalk_1.default.green(String(to))}`);
+                    }
+                }
+            }
+            // Show comment if present
+            if (entry.comment && entry.comment.trim()) {
+                console.log(`    ${chalk_1.default.yellow('💬 Comment:')} ${entry.comment}`);
+            }
+            console.log('');
+        });
+    }
+    catch (error) {
+        handleError(`Failed to fetch activity for task ${taskId}.`, error);
+    }
+});
 // --- taiga task statuses <projectId> ---
 exports.taskCommand
     .command('statuses <projectId>')

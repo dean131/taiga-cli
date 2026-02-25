@@ -226,6 +226,76 @@ exports.storyCommand
         handleError(`Failed to delete user story ${storyId}.`, error);
     }
 });
+// ─── Author helper ────────────────────────────────────────────────────
+function resolveAuthor(entry) {
+    const u = entry.user;
+    if (!u)
+        return chalk_1.default.gray('Unknown');
+    return u.name || u.full_name_display || u.username || u.email || 'Unknown';
+}
+// --- taiga story comments <storyId> ---
+exports.storyCommand
+    .command('comments <storyId>')
+    .description('Read all comments on a user story')
+    .action(async (storyId) => {
+    console.log(chalk_1.default.yellow(`Fetching comments for story ${storyId}...`));
+    try {
+        const response = await api_1.apiClient.get(`/history/userstory/${storyId}`);
+        const history = response.data;
+        const comments = history.filter((entry) => entry.comment && entry.comment.trim() !== '');
+        if (comments.length === 0) {
+            console.log(chalk_1.default.gray('No comments found on this user story.'));
+            return;
+        }
+        console.log(chalk_1.default.green(`Found ${comments.length} comment(s):\n`));
+        comments.forEach((entry, i) => {
+            const author = resolveAuthor(entry);
+            const date = new Date(entry.created_at).toLocaleString();
+            console.log(`  ${chalk_1.default.bold(`${i + 1}.`)} ${chalk_1.default.blue(author)} ${chalk_1.default.gray(`· ${date}`)}`);
+            console.log(`  ${entry.comment}`);
+            console.log('');
+        });
+    }
+    catch (error) {
+        handleError(`Failed to fetch comments for story ${storyId}.`, error);
+    }
+});
+// --- taiga story activity <storyId> ---
+exports.storyCommand
+    .command('activity <storyId>')
+    .description('Show full activity log (status changes, assignments, comments) for a user story')
+    .action(async (storyId) => {
+    console.log(chalk_1.default.yellow(`Fetching activity for story ${storyId}...`));
+    try {
+        const response = await api_1.apiClient.get(`/history/userstory/${storyId}`);
+        const history = response.data;
+        if (history.length === 0) {
+            console.log(chalk_1.default.gray('No activity found.'));
+            return;
+        }
+        console.log(chalk_1.default.green(`Activity log (${history.length} entries):\n`));
+        history.forEach((entry) => {
+            const author = resolveAuthor(entry);
+            const date = new Date(entry.created_at).toLocaleString();
+            console.log(`  ${chalk_1.default.blue(author)} ${chalk_1.default.gray(`· ${date}`)}`);
+            if (entry.diff) {
+                for (const [field, value] of Object.entries(entry.diff)) {
+                    if (Array.isArray(value) && value.length === 2) {
+                        const [from, to] = value;
+                        console.log(`    ${chalk_1.default.gray(field + ':')} ${chalk_1.default.red(String(from))} → ${chalk_1.default.green(String(to))}`);
+                    }
+                }
+            }
+            if (entry.comment && entry.comment.trim()) {
+                console.log(`    ${chalk_1.default.yellow('💬 Comment:')} ${entry.comment}`);
+            }
+            console.log('');
+        });
+    }
+    catch (error) {
+        handleError(`Failed to fetch activity for story ${storyId}.`, error);
+    }
+});
 // --- taiga story statuses <projectId> ---
 exports.storyCommand
     .command('statuses <projectId>')
