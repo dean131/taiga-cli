@@ -5,6 +5,9 @@ import chalk from 'chalk';
 import * as dotenv from 'dotenv';
 import { loginCommand } from './commands/auth';
 import { projectCommand } from './commands/project';
+import { storyCommand } from './commands/story';
+import { taskCommand } from './commands/task';
+import { sprintCommand } from './commands/sprint';
 
 // Load environment variables from .env file
 dotenv.config();
@@ -19,5 +22,8 @@ program
 // Register commands
 program.addCommand(loginCommand);
 program.addCommand(projectCommand);
+program.addCommand(storyCommand);
+program.addCommand(taskCommand);
+program.addCommand(sprintCommand);
 
 program.parse(process.argv);

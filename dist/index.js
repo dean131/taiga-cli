@@ -42,6 +42,9 @@ const chalk_1 = __importDefault(require("chalk"));
 const dotenv = __importStar(require("dotenv"));
 const auth_1 = require("./commands/auth");
 const project_1 = require("./commands/project");
+const story_1 = require("./commands/story");
+const task_1 = require("./commands/task");
+const sprint_1 = require("./commands/sprint");
 // Load environment variables from .env file
 dotenv.config();
 const program = new commander_1.Command();
@@ -52,4 +55,7 @@ program
 // Register commands
 program.addCommand(auth_1.loginCommand);
 program.addCommand(project_1.projectCommand);
+program.addCommand(story_1.storyCommand);
+program.addCommand(task_1.taskCommand);
+program.addCommand(sprint_1.sprintCommand);
 program.parse(process.argv);
