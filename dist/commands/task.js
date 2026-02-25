@@ -7,15 +7,49 @@ exports.taskCommand = void 0;
 const commander_1 = require("commander");
 const chalk_1 = __importDefault(require("chalk"));
 const api_1 = require("../api");
+// ─── Helpers ────────────────────────────────────────────────────────────────
+function handleError(label, error) {
+    console.error(chalk_1.default.red(`\n${label}`));
+    if (error.response) {
+        console.error(chalk_1.default.red(`HTTP ${error.response.status}: ${JSON.stringify(error.response.data)}`));
+    }
+    else {
+        console.error(chalk_1.default.red(error.message));
+    }
+    process.exit(1);
+}
+function statusColor(name) {
+    if (!name)
+        return chalk_1.default.gray('Unknown');
+    const lower = name.toLowerCase();
+    if (lower.includes('closed') || lower.includes('done'))
+        return chalk_1.default.green(`[${name}]`);
+    if (lower.includes('progress') || lower.includes('develop'))
+        return chalk_1.default.cyan(`[${name}]`);
+    if (lower.includes('test') || lower.includes('review'))
+        return chalk_1.default.magenta(`[${name}]`);
+    if (lower.includes('new'))
+        return chalk_1.default.gray(`[${name}]`);
+    return chalk_1.default.yellow(`[${name}]`);
+}
+// ─── Commands ───────────────────────────────────────────────────────────────
 exports.taskCommand = new commander_1.Command('task')
     .description('Manage Taiga tasks');
+// --- taiga task list <projectId> ---
 exports.taskCommand
     .command('list <projectId>')
-    .description('List tasks for a project')
-    .action(async (projectId) => {
+    .description('List all tasks for a project')
+    .option('-s, --story <storyId>', 'Filter by user story ID')
+    .option('--sprint <sprintId>', 'Filter by sprint (milestone) ID')
+    .action(async (projectId, options) => {
     console.log(chalk_1.default.yellow(`Fetching tasks for project ${projectId}...`));
     try {
-        const response = await api_1.apiClient.get(`/tasks?project=${projectId}`);
+        let url = `/tasks?project=${projectId}`;
+        if (options.story)
+            url += `&user_story=${options.story}`;
+        if (options.sprint)
+            url += `&milestone=${options.sprint}`;
+        const response = await api_1.apiClient.get(url);
         const tasks = response.data;
         if (tasks.length === 0) {
             console.log(chalk_1.default.gray('No tasks found.'));
@@ -23,21 +57,192 @@ exports.taskCommand
         }
         console.log(chalk_1.default.green(`Found ${tasks.length} tasks:\n`));
         tasks.forEach((t) => {
-            const status = chalk_1.default.yellow(`[${t.status_extra_info?.name || 'Unknown'}]`);
-            console.log(`- ${chalk_1.default.blue(t.subject)} (ID: ${t.id}) ${status}`);
+            const status = statusColor(t.status_extra_info?.name);
+            const assignee = t.assigned_to_extra_info
+                ? chalk_1.default.gray(`→ ${t.assigned_to_extra_info.full_name_display}`)
+                : chalk_1.default.gray('→ Unassigned');
+            console.log(`  ${chalk_1.default.white(`#${t.ref}`)} ${chalk_1.default.blue(t.subject)} ${status}`);
+            console.log(`      ID: ${t.id}  ${assignee}`);
             if (t.user_story_extra_info) {
-                console.log(`  Story: ${chalk_1.default.gray(t.user_story_extra_info.subject)}`);
+                console.log(`      Story: ${chalk_1.default.gray(t.user_story_extra_info.subject)}`);
             }
+            console.log('');
         });
     }
     catch (error) {
-        console.error(chalk_1.default.red('Failed to fetch tasks.'));
-        if (error.response) {
-            console.error(chalk_1.default.red(`Error ${error.response.status}: ${JSON.stringify(error.response.data)}`));
+        handleError('Failed to fetch tasks.', error);
+    }
+});
+// --- taiga task info <taskId> ---
+exports.taskCommand
+    .command('info <taskId>')
+    .description('Get detailed info about a specific task')
+    .action(async (taskId) => {
+    console.log(chalk_1.default.yellow(`Fetching task ${taskId}...`));
+    try {
+        const response = await api_1.apiClient.get(`/tasks/${taskId}`);
+        const t = response.data;
+        console.log(`\n${chalk_1.default.bold.blue(t.subject)}`);
+        console.log(`${'─'.repeat(60)}`);
+        console.log(`  ID:          ${t.id}`);
+        console.log(`  Ref:         #${t.ref}`);
+        console.log(`  Status:      ${statusColor(t.status_extra_info?.name)}`);
+        console.log(`  Assigned to: ${t.assigned_to_extra_info?.full_name_display || chalk_1.default.gray('Unassigned')}`);
+        console.log(`  User Story:  ${t.user_story_extra_info?.subject || chalk_1.default.gray('None')}`);
+        console.log(`  Sprint:      ${t.milestone_slug || chalk_1.default.gray('Not in a sprint')}`);
+        console.log(`  Created:     ${new Date(t.created_date).toLocaleString()}`);
+        console.log(`  Modified:    ${new Date(t.modified_date).toLocaleString()}`);
+        if (t.description) {
+            console.log(`\n  Description:\n  ${chalk_1.default.gray(t.description)}`);
         }
-        else {
-            console.error(chalk_1.default.red(error.message));
-        }
-        process.exit(1);
+    }
+    catch (error) {
+        handleError(`Failed to fetch task ${taskId}.`, error);
+    }
+});
+// --- taiga task create ---
+exports.taskCommand
+    .command('create')
+    .description('Create a new task')
+    .requiredOption('-p, --project <projectId>', 'Project ID')
+    .requiredOption('-s, --subject <subject>', 'Task subject/title')
+    .option('--story <storyId>', 'Link to a user story ID')
+    .option('--sprint <sprintId>', 'Assign to a sprint (milestone) ID')
+    .option('-d, --description <description>', 'Task description')
+    .action(async (options) => {
+    console.log(chalk_1.default.yellow('Creating task...'));
+    try {
+        const payload = {
+            project: parseInt(options.project),
+            subject: options.subject,
+        };
+        if (options.story)
+            payload.user_story = parseInt(options.story);
+        if (options.sprint)
+            payload.milestone = parseInt(options.sprint);
+        if (options.description)
+            payload.description = options.description;
+        const response = await api_1.apiClient.post('/tasks', payload);
+        const t = response.data;
+        console.log(chalk_1.default.green(`\n✔ Task created successfully!`));
+        console.log(`  Subject: ${chalk_1.default.blue(t.subject)}`);
+        console.log(`  ID:      ${t.id}`);
+        console.log(`  Ref:     #${t.ref}`);
+    }
+    catch (error) {
+        handleError('Failed to create task.', error);
+    }
+});
+// --- taiga task status <taskId> ---
+exports.taskCommand
+    .command('set-status <taskId>')
+    .description('Change the status of a task')
+    .requiredOption('-s, --status <statusId>', 'Status ID to set (get IDs from `taiga task statuses <projectId>`)')
+    .action(async (taskId, options) => {
+    console.log(chalk_1.default.yellow(`Updating status of task ${taskId}...`));
+    try {
+        // Fetch the current version first (required by Taiga API for PATCH)
+        const current = await api_1.apiClient.get(`/tasks/${taskId}`);
+        const version = current.data.version;
+        const response = await api_1.apiClient.patch(`/tasks/${taskId}`, {
+            status: parseInt(options.status),
+            version,
+        });
+        console.log(chalk_1.default.green(`\n✔ Status updated to: ${statusColor(response.data.status_extra_info?.name)}`));
+    }
+    catch (error) {
+        handleError(`Failed to update task ${taskId}.`, error);
+    }
+});
+// --- taiga task assign <taskId> ---
+exports.taskCommand
+    .command('assign <taskId>')
+    .description('Assign a task to a user')
+    .requiredOption('-u, --user <userId>', 'User ID to assign the task to')
+    .action(async (taskId, options) => {
+    console.log(chalk_1.default.yellow(`Assigning task ${taskId} to user ${options.user}...`));
+    try {
+        const current = await api_1.apiClient.get(`/tasks/${taskId}`);
+        const version = current.data.version;
+        const response = await api_1.apiClient.patch(`/tasks/${taskId}`, {
+            assigned_to: parseInt(options.user),
+            version,
+        });
+        const assignee = response.data.assigned_to_extra_info?.full_name_display || options.user;
+        console.log(chalk_1.default.green(`\n✔ Task assigned to ${chalk_1.default.blue(assignee)}`));
+    }
+    catch (error) {
+        handleError(`Failed to assign task ${taskId}.`, error);
+    }
+});
+// --- taiga task unassign <taskId> ---
+exports.taskCommand
+    .command('unassign <taskId>')
+    .description('Unassign a task (remove assignee)')
+    .action(async (taskId) => {
+    console.log(chalk_1.default.yellow(`Removing assignee from task ${taskId}...`));
+    try {
+        const current = await api_1.apiClient.get(`/tasks/${taskId}`);
+        const version = current.data.version;
+        await api_1.apiClient.patch(`/tasks/${taskId}`, {
+            assigned_to: null,
+            version,
+        });
+        console.log(chalk_1.default.green(`\n✔ Task unassigned successfully.`));
+    }
+    catch (error) {
+        handleError(`Failed to unassign task ${taskId}.`, error);
+    }
+});
+// --- taiga task comment <taskId> ---
+exports.taskCommand
+    .command('comment <taskId>')
+    .description('Add a comment to a task')
+    .requiredOption('-m, --message <message>', 'Comment text')
+    .action(async (taskId, options) => {
+    console.log(chalk_1.default.yellow(`Adding comment to task ${taskId}...`));
+    try {
+        const current = await api_1.apiClient.get(`/tasks/${taskId}`);
+        const version = current.data.version;
+        await api_1.apiClient.patch(`/tasks/${taskId}`, {
+            comment: options.message,
+            version,
+        });
+        console.log(chalk_1.default.green(`\n✔ Comment added successfully!`));
+    }
+    catch (error) {
+        handleError(`Failed to add comment to task ${taskId}.`, error);
+    }
+});
+// --- taiga task delete <taskId> ---
+exports.taskCommand
+    .command('delete <taskId>')
+    .description('Delete a task permanently')
+    .action(async (taskId) => {
+    try {
+        await api_1.apiClient.delete(`/tasks/${taskId}`);
+        console.log(chalk_1.default.green(`\n✔ Task ${taskId} deleted.`));
+    }
+    catch (error) {
+        handleError(`Failed to delete task ${taskId}.`, error);
+    }
+});
+// --- taiga task statuses <projectId> ---
+exports.taskCommand
+    .command('statuses <projectId>')
+    .description('List all available task statuses for a project (to get status IDs)')
+    .action(async (projectId) => {
+    console.log(chalk_1.default.yellow(`Fetching task statuses for project ${projectId}...`));
+    try {
+        const response = await api_1.apiClient.get(`/task-statuses?project=${projectId}`);
+        const statuses = response.data;
+        console.log(chalk_1.default.green(`\nAvailable statuses:\n`));
+        statuses.forEach((s) => {
+            const isClosed = s.is_closed ? chalk_1.default.gray('(closed)') : '';
+            console.log(`  ${chalk_1.default.blue(s.name)} — ID: ${s.id} ${isClosed}`);
+        });
+    }
+    catch (error) {
+        handleError(`Failed to fetch task statuses.`, error);
     }
 });
